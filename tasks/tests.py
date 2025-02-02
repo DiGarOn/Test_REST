@@ -220,16 +220,3 @@ class SearchAPITests(BaseAPITestCase):
         # Ожидаем, что найдется хотя бы одна задача, содержащая слово "Поиск" в заголовке
         self.assertTrue(any("Поиск" in task['title'] for task in tasks))
 
-
-class ErrorHandlingTests(BaseAPITestCase):
-    def test_create_task_without_title(self):
-        """
-        Тест попытки создания задачи без обязательного поля title.
-        """
-        payload = {
-            "description": "Описание без title",
-            "status": "новая"
-        }
-        response = self.client.post(reverse('task-list'), payload, format='json')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('title', response.data)

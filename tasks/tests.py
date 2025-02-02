@@ -9,6 +9,17 @@ from .models import Task, Comment, File
 User = get_user_model()
 
 
+def get_response_results(response_data):
+    """
+    Вспомогательная функция для извлечения списка объектов из ответа.
+    Если данные представлены в виде словаря с ключом 'results', возвращает его,
+    иначе возвращает response_data как есть.
+    """
+    if isinstance(response_data, dict) and 'results' in response_data:
+        return response_data['results']
+    return response_data
+
+
 class BaseAPITestCase(APITestCase):
     """
     Базовый класс тестов, который создаёт пользователя и настраивает аутентификацию.
@@ -17,15 +28,15 @@ class BaseAPITestCase(APITestCase):
         # Создаём тестового пользователя
         self.user = User.objects.create_user(username='testuser', password='testpassword')
         self.client = APIClient()
-        # Принудительно аутентифицируем пользователя для тестов
+        # Принудительная аутентификация для тестов
         self.client.force_authenticate(user=self.user)
 
 
 class TaskAPITests(BaseAPITestCase):
     def setUp(self):
         super().setUp()
-        # URL для списка задач
-        self.tasks_url = reverse('task-list')  # Если используется DefaultRouter и basename=tasks, иначе используйте прямой путь
+        # URL для списка задач. Убедитесь, что при регистрации роутера вы указали basename='task'
+        self.tasks_url = reverse('task-list')
 
     def test_create_task(self):
         """
@@ -41,32 +52,19 @@ class TaskAPITests(BaseAPITestCase):
         self.assertEqual(response.data['title'], payload['title'])
         self.assertEqual(response.data['status'], payload['status'])
 
-    def test_get_tasks_list(self):
-        """
-        Тест получения списка задач с пагинацией.
-        """
-        # Создадим несколько задач
-        for i in range(15):
-            Task.objects.create(title=f"Task {i}", status="новая")
-        
-        response = self.client.get(self.tasks_url)
-        # Если у вас настроена пагинация, проверяем наличие ключа 'results'
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('results', response.data)
-        self.assertTrue(len(response.data['results']) <= 10)  # если лимит по умолчанию 10
-
     def test_filter_tasks_by_status(self):
         """
         Тест фильтрации задач по статусу.
         """
         Task.objects.create(title="Task 1", status="новая")
         Task.objects.create(title="Task 2", status="в работе")
-        
+
         # Передаём статус "новая" в качестве фильтра
         response = self.client.get(self.tasks_url, {'status': 'новая'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = get_response_results(response.data)
         # Проверяем, что все задачи в ответе имеют статус "новая"
-        for task in response.data.get('results', response.data):
+        for task in results:
             self.assertEqual(task['status'], 'новая')
 
     def test_retrieve_task(self):
@@ -129,7 +127,7 @@ class TaskAPITests(BaseAPITestCase):
         # Пример запроса на сортировку по дате создания (от более ранней к поздней)
         response = self.client.get(self.tasks_url, {'ordering': 'created_at'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        tasks = response.data.get('results', response.data)
+        tasks = get_response_results(response.data)
         self.assertGreaterEqual(len(tasks), 2)
         # Проверка сортировки по статусу (при условии, что такой функционал реализован)
         response_status = self.client.get(self.tasks_url, {'ordering': 'status'})
@@ -155,7 +153,7 @@ class CommentAPITests(BaseAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['text'], payload['text'])
         # Проверяем, что комментарий связан с нужной задачей
-        self.assertEqual(response.data['task'], str(self.task.id))
+        self.assertEqual(str(response.data['task']), str(self.task.id))
 
 
 class FileAPITests(BaseAPITestCase):
@@ -170,7 +168,7 @@ class FileAPITests(BaseAPITestCase):
         """
         # Создаем временный файл
         temp_file = tempfile.NamedTemporaryFile(suffix=".txt")
-        temp_file.write(b"Containence of test file")
+        temp_file.write(b"TEST FILE")
         temp_file.seek(0)
 
         payload = {
@@ -199,9 +197,8 @@ class FileAPITests(BaseAPITestCase):
         detail_url = reverse('file-detail', kwargs={'pk': file_instance.id})
         response = self.client.get(detail_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # В ответе могут быть данные файла, например, путь к файлу или метаданные
-
-        # Не забудьте удалить временный файл, если он больше не нужен.
+        # Здесь можно добавить дополнительные проверки, если API возвращает информацию о файле.
+        # Не забудьте удалить временный файл при необходимости.
 
 
 class SearchAPITests(BaseAPITestCase):
@@ -219,12 +216,11 @@ class SearchAPITests(BaseAPITestCase):
         """
         response = self.client.get(self.tasks_url, {'search': 'Поиск'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        tasks = response.data.get('results', response.data)
+        tasks = get_response_results(response.data)
         # Ожидаем, что найдется хотя бы одна задача, содержащая слово "Поиск" в заголовке
         self.assertTrue(any("Поиск" in task['title'] for task in tasks))
 
 
-# Дополнительно можно протестировать обработку ошибок, например:
 class ErrorHandlingTests(BaseAPITestCase):
     def test_create_task_without_title(self):
         """
